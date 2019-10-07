@@ -1,6 +1,44 @@
 import numpy as np
 from pysixtrack.base_classes import Element
 
+class LinearMap2D(Element):
+    """2D Linear Map from tunes and Optics functions"""
+    _description = [
+        ('mux', 'rad', "Phase advance in the horizontal plane", 0),
+        ('beta_x_1', 'm', "Beta function of horizontal plane at starting position", 0),
+        ('alfa_x_1', 'm', "Alpha function of horizontal plane at starting position", 0),
+        ('beta_x_2', 'm', "Beta function of horizontal plane at final position", 0),
+        ('alfa_x_2', 'm', "Alpha function of horizontal plane at final position", 0),
+    ]
+
+
+    def track(self, p):
+        cx = p._m.cos(self.mux)
+        sx = p._m.sin(self.mux)
+
+        C00 = p._m.sqrt(self.beta_x_2 / self.beta_x_1)
+        C01 = 0.
+        C10 = (p._m.sqrt(1. / (self.beta_x_1 * self.beta_x_2)) * (self.alfa_x_1 - self.alfa_x_2))
+        C11 = p._m.sqrt(self.beta_x_1 / self.beta_x_2)
+
+        S00 = p._m.sqrt(self.beta_x_2 / self.beta_x_1) * self.alfa_x_1
+        S01 = p._m.sqrt(self.beta_x_1 * self.beta_x_2)
+        S10 = -(p._m.sqrt(1. / (self.beta_x_1 * self.beta_x_2)) * (1. + self.alfa_x_1 * self.alfa_x_2))
+        S11 = -(p._m.sqrt(self.beta_x_1 / self.beta_x_2) * self.alfa_x_2)
+
+        M00 = C00 * cx + S00 * sx
+        M10 = C10 * cx + S10 * sx
+        M01 = C01 * cx + S01 * sx
+        M11 = C11 * cx + S11 * sx
+
+        xp = p.px * p.rpp
+
+        x_new = M00 * p.x + M01 * xp
+        xp_new = M10 * p.x + M11 * xp
+
+        p.x = x_new
+        p.px = xp_new / p.rpp
+
 class LinearMap4D(Element):
     """4D Linear Map from tunes and Optics functions"""
     _description = [
