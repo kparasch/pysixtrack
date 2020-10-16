@@ -9,7 +9,7 @@ with open("line_from_mad.pkl", "rb") as fid:
     lmad = pysixtrack.Line.from_dict(pickle.load(fid))
 
 sixinput = sixtracktools.sixinput.SixInput("sixtrack/")
-lsix, other = pysixtrack.Line.from_sixinput(sixinput)
+lsix = pysixtrack.Line.from_sixinput(sixinput)
 
 original_length = lmad.get_length()
 assert (lsix.get_length() - original_length) < 1e-6
@@ -47,7 +47,9 @@ for ii, (ee_mad, ee_six, nn_mad, nn_six) in enumerate(
 
         # Check if the relative error is small
         try:
-            diff_rel = norm(np.array(dmad[kk]) - np.array(dsix[kk])) / norm(dmad[kk])
+            diff_rel = norm(np.array(dmad[kk]) - np.array(dsix[kk])) / norm(
+                dmad[kk]
+            )
         except ZeroDivisionError:
             diff_rel = 100.0
         if diff_rel < 3e-5:
@@ -70,8 +72,8 @@ for ii, (ee_mad, ee_six, nn_mad, nn_six) in enumerate(
 
         # Exception: multipole lrad is not passed to sixtraxk
         if isinstance(ee_mad, pysixtrack.elements.Multipole):
-            if kk == 'length':
-                if np.abs(ee_mad.hxl) + np.abs(ee_mad.hyl) == 0.:
+            if kk == "length":
+                if np.abs(ee_mad.hxl) + np.abs(ee_mad.hyl) == 0.0:
                     continue
 
         # Exceptions BB4D (separations are recalculated)

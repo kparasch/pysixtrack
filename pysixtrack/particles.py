@@ -1,15 +1,5 @@
 import numpy as np
-
-# attaching faddeeva to np
-from scipy.special import wofz
-
-
-def wfun(z_re, z_im):
-    w = wofz(z_re + 1j * z_im)
-    return w.real, w.imag
-
-
-np.wfun = wfun
+from .mathlibs import MathlibDefault
 
 
 def count_not_none(*lst):
@@ -17,6 +7,41 @@ def count_not_none(*lst):
 
 
 class Particles(object):
+    """
+    Coordinates:
+
+    **fields**
+
+    **properties
+
+    s       [m]  Reference accumulated pathlength
+    x       [m]  Horizontal offset
+    px      [1]  Px / (m/m0 * p0c) = beta_x gamma /(beta0 gamma0)
+    y       [m   Vertical offset]
+    py      [1]  Py / (m/m0 * p0c)
+    delta   [1]  Pc / (m/m0 * p0c) - 1
+    ptau    [1]  Energy / (m/m0 * p0c) - 1
+    psigma  [1]  ptau/beta0
+    rvv     [1]  beta/beta0
+    rpp     [1]  1/(1+delta) = (m/m0 * p0c) / Pc
+    zeta    [m]  beta (s/beta0 - ct )
+    tau     [m]
+    sigma   [m]  s - beta0 ct = rvv * zeta
+    mass0   [eV]
+    q0      [e]  reference carge
+    p0c     [eV] reference momentum
+    energy0 [eV] refernece energy
+    gamma0  [1]  reference relativistic gamma
+    beta0   [1]  reference relativistix beta
+    chi     [1]  q/ q0 * m0/m = qratio / mratio
+    mratio  [1]  mass/mass0
+    qratio  [1]  q / q0
+    partid  int
+    turn    int
+    state   int
+    elemid  int
+    """
+
     clight = 299792458
     pi = 3.141592653589793238
     echarge = 1.602176565e-19
@@ -61,11 +86,14 @@ class Particles(object):
         beta0 = sqrt(1 - 1 / gamma0 ** 2)
         return self._g2(mass0, beta0, gamma0)
 
-    def copy(self):
+    def copy(self, index=None):
         p = Particles()
         for k, v in list(self.__dict__.items()):
             if type(v) in [np.ndarray, dict]:
-                v = v.copy()
+                if index is None:
+                    v = v.copy()
+                else:
+                    v = v[index]
             p.__dict__[k] = v
         return p
 
@@ -196,9 +224,9 @@ class Particles(object):
         qratio=None,
         partid=None,
         turn=None,
-        state=None,
+        state=None,  # == 0 particle lost, == 1 particle active
         elemid=None,
-        mathlib=np,
+        mathlib=MathlibDefault,
         **args,
     ):
 
@@ -217,9 +245,38 @@ class Particles(object):
         self.__init__zeta(zeta, tau, sigma)
         self.__init__chi(chi, mratio, qratio)
         self._update_coordinates = True
+        length = self._check_array_length()
+
+        if partid is None:
+            partid = np.arange(length) if length is not None else 0
         self.partid = partid
+
+        if turn is None:
+            turn = np.zeros(length) if length is not None else 0
         self.turn = turn
+
+        if elemid is None:
+            elemid = np.zeros(length) if length is not None else 0
+        self.elemid = elemid
+
+        if state is None:
+            state = np.ones(length) if length is not None else 1
         self.state = state
+
+        self.lost_particles = []
+
+    def _check_array_length(self):
+        names = ["x", "px", "y", "py", "zeta", "_mass0", "q0", "p0c"]
+        length = None
+        for nn in names:
+            xx = getattr(self, nn)
+            if hasattr(xx, "__iter__"):
+                if length is None:
+                    length = len(xx)
+                else:
+                    if length != len(xx):
+                        raise ValueError(f"invalid length len({nn})={len(xx)}")
+        return length
 
     Px = property(lambda p: p.px * p.p0c * p.mratio)
     Py = property(lambda p: p.py * p.p0c * p.mratio)
@@ -395,14 +452,116 @@ class Particles(object):
         return out
 
     _dict_vars = (
-        "s x px y py delta zeta".split()
-        + "mass0 q0 p0c chi mratio".split()
-        + "partid turn state".split()
+        "s",
+        "x",
+        "px",
+        "y",
+        "py",
+        "delta",
+        "zeta",
+        "mass0",
+        "q0",
+        "p0c",
+        "chi",
+        "mratio",
+        "partid",
+        "turn",
+        "state",
     )
+
+    def remove_lost_particles(self, keep_memory=True):
+
+        if hasattr(self.state, "__iter__"):
+            mask_valid = self.state == 1
+
+            if np.any(~mask_valid):
+                if keep_memory:
+                    to_trash = self.copy()  # Not exactly efficient (but robust)
+                    for ff in self._dict_vars:
+                        if hasattr(getattr(self, ff), "__iter__"):
+                            setattr(
+                                to_trash, ff, getattr(self, ff)[~mask_valid]
+                            )
+                    self.lost_particles.append(to_trash)
+
+            for ff in self._dict_vars:
+                if hasattr(getattr(self, ff), "__iter__"):
+                    setattr(self, ff, getattr(self, ff)[mask_valid])
 
     def to_dict(self):
         return {kk: getattr(self, kk) for kk in self._dict_vars}
 
     @classmethod
     def from_dict(cls, dct):
+        return cls(**dct)
+
+    def compare(self, particle, rel_tol=1e-6, abs_tol=1e-15):
+        res = True
+        for kk in self._dict_vars:
+            v1 = getattr(self, kk)
+            v2 = getattr(particle, kk)
+            if v1 is not None and v2 is not None:
+                diff = v1 - v2
+                if hasattr(diff, "__iter__"):
+                    for nn in range(len(diff)):
+                        vv1 = v1[nn] if hasattr(v1, "__iter__") else v1
+                        vv2 = v2[nn] if hasattr(v2, "__iter__") else v2
+                        if abs(diff[nn]) > abs_tol:
+                            print(f"{kk}[{nn}] {vv1} {vv2}  diff:{diff[nn]}")
+                            res = False
+                        if abs(vv1) > 0 and abs(diff[nn]) / vv1 > rel_tol:
+                            print(
+                                f"{kk}[{nn}] {vv1} {vv2} rdiff:{diff[nn]/vv1}"
+                            )
+                            res = False
+                else:
+                    if abs(diff) > abs_tol:
+                        print(f"{kk} {v1} {v2}  diff:{diff}")
+                        res = False
+                    if abs(v1) > 0 and abs(diff) / v1 > rel_tol:
+                        print(f"{kk} {v1} {v2} rdiff:{diff/v1}")
+                        res = False
+        return res
+
+    @classmethod
+    def from_madx_twiss(cls, twiss):
+        out = cls(
+            p0c=twiss.summary.pc * 1e6,
+            mass0=twiss.summary.mass * 1e6,
+            q0=twiss.summary.charge,
+            s=twiss.s[:],
+            x=twiss.x[:],
+            px=twiss.px[:],
+            y=twiss.y[:],
+            py=twiss.py[:],
+            tau=twiss.t[:],
+            ptau=twiss.pt[:],
+        )
+        return out
+
+    @classmethod
+    def from_madx_track(cls, mad):
+        tracksumm = mad.table.tracksumm
+        mad_beam = mad.sequence().beam
+        out = cls(
+            p0c=mad_beam.pc * 1e6,
+            mass0=mad_beam.mass * 1e6,
+            q0=mad_beam.charge,
+            s=tracksumm.s[:],
+            x=tracksumm.x[:],
+            px=tracksumm.px[:],
+            y=tracksumm.y[:],
+            py=tracksumm.py[:],
+            tau=tracksumm.t[:],
+            ptau=tracksumm.pt[:],
+        )
+        return out
+
+    @classmethod
+    def from_list(cls, lst):
+        ll = len(lst)
+        dct = {nn: np.zeros(ll) for nn in cls._dict_vars}
+        for ii, pp in enumerate(lst):
+            for nn in cls._dict_vars:
+                dct[nn][ii] = getattr(pp, nn, 0)
         return cls(**dct)
